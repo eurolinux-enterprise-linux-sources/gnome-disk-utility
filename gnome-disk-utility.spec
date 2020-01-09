@@ -20,11 +20,13 @@
 Summary: Disk management application
 Name: gnome-disk-utility
 Version: 2.30.1
-Release: 2%{?dist}
+Release: 3%{?dist}
 License: LGPLv2+
 Group: System Environment/Libraries
 URL: http://git.gnome.org/cgit/gnome-disk-utility
 Source0: gnome-disk-utility-2.30.1.tar.bz2
+# https://bugzilla.redhat.com/show_bug.cgi?id=958546
+Patch0: gnome-disk-utility-2.30.1-fix-utf8-crash.patch
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
 BuildRequires: dbus-devel  >= %{dbus_version}
 BuildRequires: dbus-glib-devel >= %{dbus_glib_version}
@@ -104,6 +106,7 @@ develop applications with gnome-disk-utility-ui-libs.
 
 %prep
 %setup -q
+%patch0 -p1
 
 %build
 %configure %{?disable_nautilus} --disable-remote-access
@@ -222,6 +225,9 @@ fi
 %{_includedir}/gnome-disk-utility/gdu-gtk/*
 
 %changelog
+* Thu Oct 15 2015 David King <dking@redhat.com> - 2.30.1-3
+- Add upstream patch for crash with non-UTF-8 locale (#958546)
+
 * Mon Mar 22 2010 David Zeuthen <davidz@redhat.com> - 2.30.1-2%{?dist}
 - Rebuild
 - Related: rhbz#575890
