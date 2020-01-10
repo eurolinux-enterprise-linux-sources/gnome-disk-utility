@@ -1,28 +1,27 @@
-# Only enable if using patches that touches configure.ac,
-# Makefile.am or other build system related files
-#
-%global enable_autoreconf 0
-
 Name:          gnome-disk-utility
-Version:       3.22.1
+Version:       3.28.3
 Release:       1%{?dist}
 Summary:       Disks
 
 License:       GPLv2+
 URL:           https://git.gnome.org/browse/gnome-disk-utility
-Source0:       https://download.gnome.org/sources/%{name}/3.22/%{name}-%{version}.tar.xz
+Source0:       https://download.gnome.org/sources/%{name}/3.28/%{name}-%{version}.tar.xz
+# Fix the build with Python 2
+Patch0:        gnome-disk-utility-python2.patch
+# Fix the build with RHEL 7 gcc that doesn't use c99 by default
+Patch1:        gnome-disk-utility-c99.patch
+# Define __USE_XOPEN to get M_PI from math.h with RHEL 7 glibc
+Patch2:        gnome-disk-utility-m_pi.patch
 
 BuildRequires: /usr/bin/appstream-util
 BuildRequires: desktop-file-utils
 BuildRequires: docbook-style-xsl
 BuildRequires: gettext
-BuildRequires: gnome-common
-BuildRequires: intltool
 # for xsltproc
 BuildRequires: libxslt
+BuildRequires: meson
 BuildRequires: pkgconfig(dvdread)
 BuildRequires: pkgconfig(glib-2.0)
-BuildRequires: pkgconfig(gnome-settings-daemon)
 BuildRequires: pkgconfig(gtk+-3.0)
 BuildRequires: pkgconfig(libcanberra-gtk3)
 BuildRequires: pkgconfig(liblzma)
@@ -34,12 +33,6 @@ BuildRequires: pkgconfig(udisks2)
 
 Requires:      udisks2
 
-%if 0%{?enable_autoreconf}
-BuildRequires: autoconf
-BuildRequires: automake
-BuildRequires: libtool
-%endif
-
 %description
 This package contains the Disks and Disk Image Mounter applications.
 Disks supports partitioning, file system creation, encryption,
@@ -50,23 +43,17 @@ fstab/crypttab editing, ATA SMART and other features
 
 
 %build
-%if 0%{?enable_autoreconf}
-autoreconf --force --install
-%endif
-%configure
-make V=1 %{?_smp_mflags}
+%meson
+%meson_build
 
 
 %install
-%make_install
+%meson_install
 %find_lang %{name}
-
-rm -f %{buildroot}%{_libdir}/gnome-settings-daemon-3.0/*.la
-rm -f %{buildroot}%{_libdir}/gnome-settings-daemon-3.0/*.a
 
 
 %check
-appstream-util validate-relax --nonet %{buildroot}/%{_datadir}/appdata/org.gnome.DiskUtility.appdata.xml
+appstream-util validate-relax --nonet %{buildroot}%{_datadir}/metainfo/org.gnome.DiskUtility.appdata.xml
 desktop-file-validate %{buildroot}%{_datadir}/applications/*.desktop
 
 
@@ -94,20 +81,27 @@ gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
 %license COPYING
 %{_bindir}/gnome-disks
 %{_bindir}/gnome-disk-image-mounter
-%{_datadir}/appdata/org.gnome.DiskUtility.appdata.xml
 %{_datadir}/applications/org.gnome.DiskUtility.desktop
 %{_datadir}/applications/gnome-disk-image-mounter.desktop
 %{_datadir}/applications/gnome-disk-image-writer.desktop
 %{_datadir}/dbus-1/services/org.gnome.DiskUtility.service
 %{_datadir}/glib-2.0/schemas/org.gnome.Disks.gschema.xml
-%{_datadir}/glib-2.0/schemas/org.gnome.settings-daemon.plugins.gdu-sd.gschema.xml
 %{_datadir}/icons/hicolor/*/apps/gnome-disks*
-%{_libdir}/gnome-settings-daemon-3.0/gdu-sd-plugin.gnome-settings-plugin
-%{_libdir}/gnome-settings-daemon-3.0/libgdu-sd.so
+%{_datadir}/metainfo/org.gnome.DiskUtility.appdata.xml
 %{_mandir}/man1/*
+%{_sysconfdir}/xdg/autostart/org.gnome.SettingsDaemon.DiskUtilityNotify.desktop
+%{_libexecdir}/gsd-disk-utility-notify
 
 
 %changelog
+* Fri Jun 01 2018 Kalev Lember <klember@redhat.com> - 3.28.3-1
+- Update to 3.28.3
+- Resolves: #1568170
+
+* Tue May 08 2018 Kalev Lember <klember@redhat.com> - 3.28.2-1
+- Update to 3.28.2
+- Resolves: #1568170
+
 * Thu Nov 24 2016 Kalev Lember <klember@redhat.com> - 3.22.1-1
 - Update to 3.22.1
 - Resolves: #1386891

@@ -1,0 +1,14 @@
+--- gnome-disk-utility-3.28.2/meson.build.c99	2018-05-08 08:43:29.000000000 +0200
++++ gnome-disk-utility-3.28.2/meson.build	2018-05-24 00:08:49.773252035 +0200
+@@ -2,7 +2,10 @@
+   'gnome-disk-utility', 'c',
+   version: '3.28.2',
+   license: 'GPL2.0',
+-  default_options: 'buildtype=debugoptimized',
++  default_options: [
++    'buildtype=debugoptimized',
++    'c_std=c99',
++  ],
+   meson_version: '>= 0.43.0'
+ )
+ 

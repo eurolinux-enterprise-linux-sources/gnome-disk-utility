@@ -9,7 +9,6 @@
 
 #include "config.h"
 
-#define _FILE_OFFSET_BITS 64
 #include <glib/gi18n.h>
 #include <gio/gunixfdlist.h>
 #include <gio/gunixinputstream.h>
@@ -1169,8 +1168,16 @@ benchmark_thread (gpointer user_data)
   long page_size;
   guint64 disk_size;
   GVariantBuilder options_builder;
+  guint inhibit_cookie;
 
   //g_print ("bm thread start\n");
+
+  inhibit_cookie = gtk_application_inhibit (GTK_APPLICATION (gdu_window_get_application (data->window)),
+                                            GTK_WINDOW (data->dialog),
+                                            GTK_APPLICATION_INHIBIT_SUSPEND |
+                                            GTK_APPLICATION_INHIBIT_LOGOUT,
+                                            /* Translators: Reason why suspend/logout is being inhibited */
+                                            _("Benchmark"));
 
   g_variant_builder_init (&options_builder, G_VARIANT_TYPE_VARDICT);
   g_variant_builder_add (&options_builder, "{sv}", "writable", g_variant_new_boolean (data->bm_do_write));
@@ -1440,6 +1447,9 @@ benchmark_thread (gpointer user_data)
   data->bm_in_progress = FALSE;
   data->bm_thread = NULL;
   data->bm_state = BM_STATE_NONE;
+
+  if (inhibit_cookie > 0)
+    gtk_application_uninhibit (GTK_APPLICATION (gdu_window_get_application (data->window)), inhibit_cookie);
 
   if (error != NULL)
     {
