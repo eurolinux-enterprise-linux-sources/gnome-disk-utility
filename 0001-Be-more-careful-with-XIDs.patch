@@ -1,0 +1,32 @@
+From d6e5ef02ebdc059e2412d429c23a39f6171a4851 Mon Sep 17 00:00:00 2001
+From: Matthias Clasen <mclasen@redhat.com>
+Date: Wed, 8 Jan 2014 18:51:53 -0500
+Subject: [PATCH 1/2] Be more careful with XIDs
+
+When an invalid XID is specified, we end up calling
+gdk_window_set_transient_for with a NULL window. This leads
+to a crash, so don't do it, and instead silently ignore
+the invalid XID.
+
+https://bugzilla.gnome.org/show_bug.cgi?id=721278
+---
+ src/disks/gduformatvolumedialog.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/disks/gduformatvolumedialog.c b/src/disks/gduformatvolumedialog.c
+index c737cb0..f741ade 100644
+--- a/src/disks/gduformatvolumedialog.c
++++ b/src/disks/gduformatvolumedialog.c
+@@ -181,7 +181,8 @@ gdu_format_volume_dialog_show_internal (UDisksClient *client,
+       GdkWindow *foreign_window = gdk_x11_window_foreign_new_for_display (gdk_display_get_default (), parent_xid);
+       if (!gtk_widget_get_realized (data->dialog))
+           gtk_widget_realize (data->dialog);
+-      gdk_window_set_transient_for (gtk_widget_get_window (data->dialog), foreign_window);
++      if (foreign_window != NULL)
++        gdk_window_set_transient_for (gtk_widget_get_window (data->dialog), foreign_window);
+     }
+ 
+   gtk_dialog_set_default_response (GTK_DIALOG (data->dialog), GTK_RESPONSE_OK);
+-- 
+1.8.4.2
+

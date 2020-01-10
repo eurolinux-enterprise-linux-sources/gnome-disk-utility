@@ -11,13 +11,17 @@
 Summary: Disks
 Name: gnome-disk-utility
 Version: 3.8.2
-Release: 1%{?dist}
+Release: 5%{?dist}
 License: GPLv2+
 Group: System Environment/Libraries
 URL: http://git.gnome.org/browse/gnome-disk-utility
 Source0: http://download.gnome.org/sources/gnome-disk-utility/3.8/%{name}-%{version}.tar.xz
 # https://bugzilla.gnome.org/show_bug.cgi?id=701457
 Patch0: gnome-disk-utility-3.8.2-format.patch
+Patch1: complete-l10n.patch
+
+Patch2: 0001-Be-more-careful-with-XIDs.patch
+Patch3: 0002-Make-dialog-work-with-xid-again.patch
 
 BuildRequires: glib2-devel >= %{glib2_version}
 BuildRequires: gtk3-devel >= %{gtk3_version}
@@ -62,6 +66,9 @@ fstab/crypttab editing, ATA SMART and other features
 %prep
 %setup -q
 %patch0 -p1 -b .format
+%patch1 -p2 -b .complete-l10n
+%patch2 -p1 -b .xid
+%patch3 -p1 -b .format
 
 %build
 %if 0%{?enable_autoreconf}
@@ -127,6 +134,19 @@ done
 %doc README AUTHORS NEWS COPYING
 
 %changelog
+* Fri Jan 24 2014 Daniel Mach <dmach@redhat.com> - 3.8.2-5
+- Mass rebuild 2014-01-24
+
+* Fri Jan 10 2014 Matthias Clasen <mclasen@redhat.com> - 3.8.2-4
+- Make formatting usb drives from nautilus work again
+Resolves: #1051664
+
+* Thu Jan  9 2014 Zeeshan Ali <zeenix@redhat.com> - 3.8.2-3
+- Complete translations (#1030339).
+
+* Fri Dec 27 2013 Daniel Mach <dmach@redhat.com> - 3.8.2-2
+- Mass rebuild 2013-12-27
+
 * Sun Jun 02 2013 Kalev Lember <kalevlember@gmail.com> - 3.8.2-1
 - Update to 3.8.2
 
