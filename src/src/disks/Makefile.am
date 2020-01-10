@@ -66,7 +66,11 @@ gnome_disks_SOURCES = 							\
 
 gnome_disks_CPPFLAGS = 					\
 	-I$(top_srcdir)/src/				\
+	-I$(top_srcdir)/src/disks			\
+	-I$(top_srcdir)/src/libgdu			\
 	-I$(top_builddir)/src/				\
+	-I$(top_builddir)/src/disks			\
+	-I$(top_builddir)/src/libgdu			\
 	-DPACKAGE_DATA_DIR=\""$(datadir)"\"		\
 	-DG_LOG_DOMAIN=\"GNOME-Disks\"			\
 	-DGNOMELOCALEDIR=\""$(datadir)/locale"\"	\
@@ -77,7 +81,7 @@ gnome_disks_CFLAGS = 					\
 	$(UDISKS2_CFLAGS)				\
 	$(GTK3_CFLAGS)					\
 	$(LIBSECRET1_CFLAGS)				\
-	$(LIBSYSTEMD_LOGIN_CFLAGS)			\
+	$(LIBSYSTEMD_CFLAGS)				\
 	$(PWQUALITY_CFLAGS)				\
 	$(CANBERRA_CFLAGS)				\
 	$(LIBDVDREAD_CFLAGS)				\
@@ -91,12 +95,16 @@ gnome_disks_LDADD = 					\
 	$(UDISKS2_LIBS)					\
 	$(GTK3_LIBS)					\
 	$(LIBSECRET1_LIBS)				\
-	$(LIBSYSTEMD_LOGIN_LIBS)			\
+	$(LIBSYSTEMD_LIBS)				\
 	$(PWQUALITY_LIBS)				\
 	$(CANBERRA_LIBS)				\
 	$(LIBDVDREAD_LIBS)				\
 	$(LIBLZMA_LIBS)					\
         $(top_builddir)/src/libgdu/libgdu.la        	\
+	$(NULL)
+
+gnome_disks_LDFLAGS =					\
+	$(WARN_LDFLAGS)					\
 	$(NULL)
 
 EXTRA_DIST = 						\
@@ -107,3 +115,5 @@ EXTRA_DIST = 						\
 
 clean-local :
 	rm -f *~
+
+-include $(top_srcdir)/git.mk

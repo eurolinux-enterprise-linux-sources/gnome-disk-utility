@@ -1,20 +1,18 @@
 # Only enable if using patches that touches configure.ac,
 # Makefile.am or other build system related files
 #
-%define enable_autoreconf 0
+%global enable_autoreconf 0
 
 Name:          gnome-disk-utility
-Version:       3.14.0
-Release:       2%{?dist}
+Version:       3.22.1
+Release:       1%{?dist}
 Summary:       Disks
 
-Group:         Applications/System
 License:       GPLv2+
 URL:           https://git.gnome.org/browse/gnome-disk-utility
-Source0:       https://download.gnome.org/sources/%{name}/3.14/%{name}-%{version}.tar.xz
+Source0:       https://download.gnome.org/sources/%{name}/3.22/%{name}-%{version}.tar.xz
 
-Patch0: desktop-file-encoding.patch
-
+BuildRequires: /usr/bin/appstream-util
 BuildRequires: desktop-file-utils
 BuildRequires: docbook-style-xsl
 BuildRequires: gettext
@@ -30,7 +28,7 @@ BuildRequires: pkgconfig(libcanberra-gtk3)
 BuildRequires: pkgconfig(liblzma)
 BuildRequires: pkgconfig(libnotify)
 BuildRequires: pkgconfig(libsecret-1)
-BuildRequires: pkgconfig(libsystemd-login)
+BuildRequires: pkgconfig(libsystemd)
 BuildRequires: pkgconfig(pwquality)
 BuildRequires: pkgconfig(udisks2)
 
@@ -48,8 +46,8 @@ Disks supports partitioning, file system creation, encryption,
 fstab/crypttab editing, ATA SMART and other features
 
 %prep
-%setup -q
-%patch0 -p1 -b .encoding
+%autosetup -p1
+
 
 %build
 %if 0%{?enable_autoreconf}
@@ -60,7 +58,7 @@ make V=1 %{?_smp_mflags}
 
 
 %install
-make DESTDIR=%{buildroot} INSTALL="install -p" install
+%make_install
 %find_lang %{name}
 
 rm -f %{buildroot}%{_libdir}/gnome-settings-daemon-3.0/*.la
@@ -68,13 +66,12 @@ rm -f %{buildroot}%{_libdir}/gnome-settings-daemon-3.0/*.a
 
 
 %check
+appstream-util validate-relax --nonet %{buildroot}/%{_datadir}/appdata/org.gnome.DiskUtility.appdata.xml
 desktop-file-validate %{buildroot}%{_datadir}/applications/*.desktop
 
 
 %post
-for d in hicolor HighContrast ; do
-    touch --no-create %{_datadir}/icons/$d &>/dev/null || :
-done
+touch --no-create %{_datadir}/icons/hicolor &>/dev/null || :
 update-desktop-database %{_datadir}/applications &> /dev/null || :
 
 
@@ -82,37 +79,39 @@ update-desktop-database %{_datadir}/applications &> /dev/null || :
 update-desktop-database %{_datadir}/applications &> /dev/null || :
 if [ $1 -eq 0 ] ; then
     glib-compile-schemas %{_datadir}/glib-2.0/schemas &>/dev/null || :
-    for d in hicolor HighContrast ; do
-        touch --no-create %{_datadir}/icons/$d &>/dev/null || :
-        gtk-update-icon-cache %{_datadir}/icons/$d &>/dev/null || :
-    done
+    touch --no-create %{_datadir}/icons/hicolor &>/dev/null || :
+    gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
 fi
 
 
 %posttrans
 glib-compile-schemas %{_datadir}/glib-2.0/schemas &>/dev/null || :
-for d in hicolor HighContrast ; do
-    gtk-update-icon-cache %{_datadir}/icons/$d &>/dev/null || :
-done
+gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
 
 
 %files -f %{name}.lang
-%doc AUTHORS COPYING NEWS README
+%doc AUTHORS NEWS README
+%license COPYING
 %{_bindir}/gnome-disks
 %{_bindir}/gnome-disk-image-mounter
-%{_datadir}/applications/gnome-disks.desktop
+%{_datadir}/appdata/org.gnome.DiskUtility.appdata.xml
+%{_datadir}/applications/org.gnome.DiskUtility.desktop
 %{_datadir}/applications/gnome-disk-image-mounter.desktop
 %{_datadir}/applications/gnome-disk-image-writer.desktop
+%{_datadir}/dbus-1/services/org.gnome.DiskUtility.service
 %{_datadir}/glib-2.0/schemas/org.gnome.Disks.gschema.xml
 %{_datadir}/glib-2.0/schemas/org.gnome.settings-daemon.plugins.gdu-sd.gschema.xml
 %{_datadir}/icons/hicolor/*/apps/gnome-disks*
-%{_datadir}/icons/HighContrast/*/apps/gnome-disks.png
 %{_libdir}/gnome-settings-daemon-3.0/gdu-sd-plugin.gnome-settings-plugin
 %{_libdir}/gnome-settings-daemon-3.0/libgdu-sd.so
 %{_mandir}/man1/*
 
 
 %changelog
+* Thu Nov 24 2016 Kalev Lember <klember@redhat.com> - 3.22.1-1
+- Update to 3.22.1
+- Resolves: #1386891
+
 * Fri May 22 2015 Matthias Clasen <mclasen@redhat.com> - 3.14.0-2
 - Remove deprecated keys from desktop files
 Related: #1174596

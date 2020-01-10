@@ -32,7 +32,9 @@ libgdu_la_SOURCES = 							\
 
 libgdu_la_CPPFLAGS = 					\
 	-I$(top_srcdir)/src/				\
+	-I$(top_srcdir)/src/libgdu			\
 	-I$(top_builddir)/src/				\
+	-I$(top_srcdir)/src/libgdu			\
 	-DPACKAGE_DATA_DIR=\""$(datadir)"\"		\
 	-DG_LOG_DOMAIN=\"libgdu\"			\
 	-DGNOMELOCALEDIR=\""$(datadir)/locale"\"	\
@@ -43,10 +45,14 @@ libgdu_la_CFLAGS = 					\
 	$(UDISKS2_CFLAGS)				\
 	$(GTK3_CFLAGS)					\
 	$(LIBSECRET1_CFLAGS)				\
-	$(LIBSYSTEMD_LOGIN_CFLAGS)			\
+	$(LIBSYSTEMD_CFLAGS)				\
 	$(PWQUALITY_CFLAGS)				\
 	$(WARN_CFLAGS)					\
 	-lm						\
+	$(NULL)
+
+libgdu_la_LDFLAGS =					\
+	$(WARN_LDFLAGS)					\
 	$(NULL)
 
 libgdu_la_LIBADD = 					\
@@ -54,7 +60,7 @@ libgdu_la_LIBADD = 					\
 	$(UDISKS2_LIBS)					\
 	$(GTK3_LIBS)					\
 	$(LIBSECRET1_LIBS)				\
-	$(LIBSYSTEMD_LOGIN_LIBS)			\
+	$(LIBSYSTEMD_LIBS)				\
 	$(PWQUALITY_LIBS)				\
 	$(NULL)
 
@@ -65,3 +71,5 @@ EXTRA_DIST = 						\
 
 clean-local :
 	rm -f *~
+
+-include $(top_srcdir)/git.mk
