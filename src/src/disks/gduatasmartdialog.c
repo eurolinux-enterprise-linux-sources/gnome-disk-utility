@@ -718,9 +718,9 @@ pretty_to_string (guint64 pretty,
       break;
 
     case 3: /* SK_SMART_ATTRIBUTE_UNIT_SECTORS */
+      /* Translators: Used in the treeview for the pretty/interpreted value of an attribute
+       * for a sector-based unit */
       ret = g_strdup_printf (dngettext (GETTEXT_PACKAGE,
-                                        /* Translators: Used in the treeview for the pretty/interpreted value of an attribute
-                                         * for a sector-based unit */
                                         "%d sector",
                                         "%d sectors",
                                         (gint) pretty),
@@ -1429,7 +1429,7 @@ smart_set_enabled_cb (GObject      *source_object,
                                                        &error))
     {
       gdu_utils_show_error (GTK_WINDOW (data->window),
-                            _("An error occurred when trying to toggle whether SMART is enabled"),
+                            _("An error occurred when trying toggle whether SMART is enabled"),
                             error);
       g_clear_error (&error);
     }
@@ -1506,6 +1506,7 @@ gdu_ata_smart_dialog_show (GduWindow    *window,
   gtk_tree_view_set_model (GTK_TREE_VIEW (data->attributes_treeview),
                            GTK_TREE_MODEL (data->attributes_list));
 
+  gtk_tree_view_set_rules_hint (GTK_TREE_VIEW (data->attributes_treeview), TRUE);
   gtk_tree_view_set_tooltip_column (GTK_TREE_VIEW (data->attributes_treeview), LONG_DESC_COLUMN);
 
   column = gtk_tree_view_column_new ();
@@ -1642,10 +1643,6 @@ gdu_ata_smart_dialog_show (GduWindow    *window,
     {
       gint response;
       response = gtk_dialog_run (GTK_DIALOG (data->dialog));
-
-      if (response < 0)
-        break;
-
       /* Keep in sync with .ui file */
       switch (response)
         {
@@ -1658,9 +1655,10 @@ gdu_ata_smart_dialog_show (GduWindow    *window,
         case 2:
           refresh_do (data);
           break;
-        default:
-          g_assert_not_reached ();
         }
+
+      if (response < 0)
+        break;
     }
 
   g_source_remove (timeout_id);

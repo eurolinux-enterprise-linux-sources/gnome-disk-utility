@@ -24,8 +24,6 @@ struct _GduDeviceTreeModel
   GduApplication *application;
   UDisksClient *client;
 
-  GduDeviceTreeModelFlags flags;
-
   GList *current_drives;
   GtkTreeIter drive_iter;
   gboolean drive_iter_valid;
@@ -33,6 +31,10 @@ struct _GduDeviceTreeModel
   GList *current_blocks;
   GtkTreeIter block_iter;
   gboolean block_iter_valid;
+
+  GList *current_mdraids;
+  GtkTreeIter mdraid_iter;
+  gboolean mdraid_iter_valid;
 
   guint spinner_timeout;
 
@@ -50,8 +52,7 @@ typedef struct
 enum
 {
   PROP_0,
-  PROP_APPLICATION,
-  PROP_FLAGS
+  PROP_APPLICATION
 };
 
 G_DEFINE_TYPE (GduDeviceTreeModel, gdu_device_tree_model, GTK_TYPE_TREE_STORE);
@@ -60,6 +61,10 @@ static void coldplug (GduDeviceTreeModel *model);
 
 static void on_client_changed (UDisksClient  *client,
                                gpointer       user_data);
+
+static gboolean update_mdraid (GduDeviceTreeModel *model,
+                               UDisksObject       *object,
+                               gboolean            from_timer);
 
 static gboolean update_drive (GduDeviceTreeModel *model,
                               UDisksObject       *object,
@@ -75,8 +80,7 @@ gdu_device_tree_model_finalize (GObject *object)
 {
   GduDeviceTreeModel *model = GDU_DEVICE_TREE_MODEL (object);
 
-  if (model->pefs_timeout_id != 0)
-    g_source_remove (model->pefs_timeout_id);
+  g_source_remove (model->pefs_timeout_id);
 
   if (model->spinner_timeout != 0)
     g_source_remove (model->spinner_timeout);
@@ -88,7 +92,10 @@ gdu_device_tree_model_finalize (GObject *object)
   g_list_foreach (model->current_drives, (GFunc) g_object_unref, NULL);
   g_list_free (model->current_drives);
 
-  g_object_unref (model->application);
+  g_list_foreach (model->current_mdraids, (GFunc) g_object_unref, NULL);
+  g_list_free (model->current_mdraids);
+
+  g_object_unref (model->client);
 
   G_OBJECT_CLASS (gdu_device_tree_model_parent_class)->finalize (object);
 }
@@ -112,10 +119,6 @@ gdu_device_tree_model_get_property (GObject    *object,
       g_value_set_object (value, gdu_device_tree_model_get_application (model));
       break;
 
-    case PROP_FLAGS:
-      g_value_set_flags (value, gdu_device_tree_model_get_flags (model));
-      break;
-
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -135,10 +138,6 @@ gdu_device_tree_model_set_property (GObject      *object,
     case PROP_APPLICATION:
       model->application = g_value_dup_object (value);
       model->client = gdu_application_get_client (model->application);
-      break;
-
-    case PROP_FLAGS:
-      model->flags = g_value_get_flags (value);
       break;
 
     default:
@@ -481,22 +480,8 @@ gdu_device_tree_model_constructed (GObject *object)
                     model);
   coldplug (model);
 
-  if (model->flags & GDU_DEVICE_TREE_MODEL_FLAGS_UPDATE_POWER_STATE)
-    {
-      model->pefs_timeout_id = g_timeout_add_seconds (5, on_pefs_timeout, model);
-      on_pefs_timeout (model);
-    }
-
-  if (model->flags & GDU_DEVICE_TREE_MODEL_FLAGS_INCLUDE_NONE_ITEM)
-    {
-      gtk_tree_store_insert_with_values (GTK_TREE_STORE (model),
-                                         &model->drive_iter,
-                                         NULL, /* GtkTreeIter *parent */
-                                         0,
-                                         GDU_DEVICE_TREE_MODEL_COLUMN_NAME, _("(None)"),
-                                         GDU_DEVICE_TREE_MODEL_COLUMN_SORT_KEY, "00_0select_device",
-                                         -1);
-    }
+  model->pefs_timeout_id = g_timeout_add_seconds (5, on_pefs_timeout, model);
+  on_pefs_timeout (model);
 
   if (G_OBJECT_CLASS (gdu_device_tree_model_parent_class)->constructed != NULL)
     G_OBJECT_CLASS (gdu_device_tree_model_parent_class)->constructed (object);
@@ -526,27 +511,11 @@ gdu_device_tree_model_class_init (GduDeviceTreeModelClass *klass)
                                                         G_PARAM_WRITABLE |
                                                         G_PARAM_CONSTRUCT_ONLY |
                                                         G_PARAM_STATIC_STRINGS));
-
-  /**
-   * GduDeviceTreeModel:flags:
-   *
-   * The #GduApplication used by the #GduDeviceTreeModel instance.
-   */
-  g_object_class_install_property (gobject_class,
-                                   PROP_FLAGS,
-                                   g_param_spec_flags ("flags", NULL, NULL,
-                                                       GDU_TYPE_DEVICE_TREE_MODEL_FLAGS,
-                                                       GDU_DEVICE_TREE_MODEL_FLAGS_NONE,
-                                                       G_PARAM_READABLE |
-                                                       G_PARAM_WRITABLE |
-                                                       G_PARAM_CONSTRUCT_ONLY |
-                                                       G_PARAM_STATIC_STRINGS));
 }
 
 /**
  * gdu_device_tree_model_new:
  * @application: A #GduApplication.
- * @flags: Flags from #GduDeviceTreeModelFlags.
  *
  * Creates a new #GduDeviceTreeModel for viewing the devices belonging to
  * @application.
@@ -554,12 +523,10 @@ gdu_device_tree_model_class_init (GduDeviceTreeModelClass *klass)
  * Returns: A #GduDeviceTreeModel. Free with g_object_unref().
  */
 GduDeviceTreeModel *
-gdu_device_tree_model_new (GduApplication          *application,
-                           GduDeviceTreeModelFlags  flags)
+gdu_device_tree_model_new (GduApplication *application)
 {
   return GDU_DEVICE_TREE_MODEL (g_object_new (GDU_TYPE_DEVICE_TREE_MODEL,
                                               "application", application,
-                                              "flags", flags,
                                               NULL));
 }
 
@@ -579,30 +546,12 @@ gdu_device_tree_model_get_application (GduDeviceTreeModel *model)
   return model->application;
 }
 
-/**
- * gdu_device_tree_model_get_flags:
- * @model: A #GduDeviceTreeModel.
- *
- * Gets the #GduDeviceTreeModelFlags used by @model.
- *
- * Returns: The flags that @model was constructed with.
- */
-GduDeviceTreeModelFlags
-gdu_device_tree_model_get_flags (GduDeviceTreeModel *model)
-{
-  g_return_val_if_fail (GDU_IS_DEVICE_TREE_MODEL (model), GDU_DEVICE_TREE_MODEL_FLAGS_NONE);
-  return model->flags;
-}
-
 /* ---------------------------------------------------------------------------------------------------- */
 
 static GtkTreeIter *
 get_drive_header_iter (GduDeviceTreeModel *model)
 {
   gchar *s;
-
-  if (model->flags & GDU_DEVICE_TREE_MODEL_FLAGS_FLAT)
-    return NULL;
 
   if (model->drive_iter_valid)
     goto out;
@@ -652,6 +601,79 @@ add_drive (GduDeviceTreeModel *model,
 static void
 remove_drive (GduDeviceTreeModel *model,
               UDisksObject       *object)
+{
+  GtkTreeIter iter;
+
+  if (!find_iter_for_object (model,
+                             object,
+                             &iter))
+    {
+      g_warning ("Error finding iter for object at %s",
+                 g_dbus_object_get_object_path (G_DBUS_OBJECT (object)));
+      goto out;
+    }
+
+  gtk_tree_store_remove (GTK_TREE_STORE (model), &iter);
+
+ out:
+  ;
+}
+
+/* ---------------------------------------------------------------------------------------------------- */
+
+static GtkTreeIter *
+get_mdraid_header_iter (GduDeviceTreeModel *model)
+{
+  gchar *s;
+
+  if (model->mdraid_iter_valid)
+    goto out;
+
+  s = g_strdup_printf ("<small>%s</small>",
+                       _("RAID Arrays"));
+  gtk_tree_store_insert_with_values (GTK_TREE_STORE (model),
+                                     &model->mdraid_iter,
+                                     NULL, /* GtkTreeIter *parent */
+                                     0,
+                                     GDU_DEVICE_TREE_MODEL_COLUMN_IS_HEADING, TRUE,
+                                     GDU_DEVICE_TREE_MODEL_COLUMN_HEADING_TEXT, s,
+                                     GDU_DEVICE_TREE_MODEL_COLUMN_SORT_KEY, "01_mdraid_0",
+                                     -1);
+  g_free (s);
+
+  model->mdraid_iter_valid = TRUE;
+
+ out:
+  return &model->mdraid_iter;
+}
+
+static void
+nuke_mdraid_header (GduDeviceTreeModel *model)
+{
+  if (model->mdraid_iter_valid)
+    {
+      gtk_tree_store_remove (GTK_TREE_STORE (model), &model->mdraid_iter);
+      model->mdraid_iter_valid = FALSE;
+    }
+}
+
+static void
+add_mdraid (GduDeviceTreeModel *model,
+            UDisksObject       *object,
+            GtkTreeIter        *parent)
+{
+  GtkTreeIter iter;
+  gtk_tree_store_insert_with_values (GTK_TREE_STORE (model),
+                                     &iter,
+                                     parent,
+                                     0,
+                                     GDU_DEVICE_TREE_MODEL_COLUMN_OBJECT, object,
+                                     -1);
+}
+
+static void
+remove_mdraid (GduDeviceTreeModel *model,
+               UDisksObject       *object)
 {
   GtkTreeIter iter;
 
@@ -797,11 +819,45 @@ drive_has_jobs (GduDeviceTreeModel *model,
 /* ---------------------------------------------------------------------------------------------------- */
 
 static gboolean
+mdraid_has_jobs (GduDeviceTreeModel *model,
+                 UDisksMDRaid       *mdraid)
+{
+  gboolean ret = FALSE;
+  UDisksBlock *block = NULL;
+
+  if (iface_has_jobs (model, G_DBUS_INTERFACE (mdraid)))
+    {
+      ret = TRUE;
+      goto out;
+    }
+
+  block = udisks_client_get_block_for_mdraid (model->client, mdraid);
+  if (block != NULL && block_has_jobs (model, block))
+    {
+      ret = TRUE;
+      goto out;
+    }
+
+  out:
+  g_clear_object (&block);
+  return ret;
+}
+
+/* ---------------------------------------------------------------------------------------------------- */
+
+static gboolean
 on_spinner_timeout (gpointer user_data)
 {
   GduDeviceTreeModel *model = GDU_DEVICE_TREE_MODEL (user_data);
   GList *l;
   gboolean keep_animating = FALSE;
+
+  for (l = model->current_mdraids; l != NULL; l = l->next)
+    {
+      UDisksObject *object = UDISKS_OBJECT (l->data);
+      if (update_mdraid (model, object, TRUE))
+        keep_animating = TRUE;
+    }
 
   for (l = model->current_drives; l != NULL; l = l->next)
     {
@@ -841,13 +897,11 @@ update_drive (GduDeviceTreeModel *model,
   UDisksObjectInfo *info = NULL;
   UDisksBlock *block = NULL;
   gchar *s = NULL;
-  gchar *included_device_name = NULL;
   gboolean warning = FALSE;
   gboolean jobs_running = FALSE;
   GtkTreeIter iter;
   guint pulse;
   guint64 size = 0;
-  GIcon *icon = NULL;
 
   if (!find_iter_for_object (model,
                              object,
@@ -869,32 +923,23 @@ update_drive (GduDeviceTreeModel *model,
       g_free (s);
     }
 
-  if (model->flags & GDU_DEVICE_TREE_MODEL_FLAGS_INCLUDE_DEVICE_NAME)
-    included_device_name = g_strdup_printf (" (%s)", udisks_block_get_preferred_device (block));
-
   info = udisks_client_get_object_info (model->client, object);
   if (warning)
     {
       /* TODO: once https://bugzilla.gnome.org/show_bug.cgi?id=657194 is resolved, use that instead
        * of hard-coding the color
        */
-      s = g_strdup_printf ("<span foreground=\"#ff0000\">%s</span>"
-                           "%s"
-                           "<small><span foreground=\"#ff0000\">%s%s</span></small>",
+      s = g_strdup_printf ("<span foreground=\"#ff0000\">%s</span>\n"
+                           "<small><span foreground=\"#ff0000\">%s</span></small>",
                            udisks_object_info_get_description (info),
-                           model->flags & GDU_DEVICE_TREE_MODEL_FLAGS_ONE_LINE_NAME ? " — " : "\n",
-                           udisks_object_info_get_name (info),
-                           included_device_name != NULL ? included_device_name : "");
+                           udisks_object_info_get_name (info));
     }
   else
     {
-      s = g_strdup_printf ("%s"
-                           "%s"
-                           "<small>%s%s</small>",
+      s = g_strdup_printf ("%s\n"
+                           "<small>%s</small>",
                            udisks_object_info_get_description (info),
-                           model->flags & GDU_DEVICE_TREE_MODEL_FLAGS_ONE_LINE_NAME ? " — " : "\n",
-                           udisks_object_info_get_name (info),
-                           included_device_name != NULL ? included_device_name : "");
+                           udisks_object_info_get_name (info));
     }
 
   jobs_running = drive_has_jobs (model, drive);
@@ -908,13 +953,9 @@ update_drive (GduDeviceTreeModel *model,
   if (from_timer)
     pulse += 1;
 
-  icon = udisks_object_info_get_media_icon (info);
-  if (icon == NULL)
-    icon = udisks_object_info_get_icon (info);
-
   gtk_tree_store_set (GTK_TREE_STORE (model),
                       &iter,
-                      GDU_DEVICE_TREE_MODEL_COLUMN_ICON, icon,
+                      GDU_DEVICE_TREE_MODEL_COLUMN_ICON, udisks_object_info_get_icon (info),
                       GDU_DEVICE_TREE_MODEL_COLUMN_NAME, s,
                       GDU_DEVICE_TREE_MODEL_COLUMN_SORT_KEY, udisks_object_info_get_sort_key (info),
                       GDU_DEVICE_TREE_MODEL_COLUMN_WARNING, warning,
@@ -925,7 +966,7 @@ update_drive (GduDeviceTreeModel *model,
                       -1);
 
   /* update spinner, if jobs are running */
-  if (jobs_running && (model->flags & GDU_DEVICE_TREE_MODEL_FLAGS_UPDATE_PULSE))
+  if (jobs_running)
     {
       if (model->spinner_timeout == 0)
         {
@@ -937,7 +978,6 @@ update_drive (GduDeviceTreeModel *model,
   g_clear_object (&block);
   g_clear_object (&info);
   g_free (s);
-  g_free (included_device_name);
   return jobs_running;
 }
 
@@ -1010,13 +1050,216 @@ update_drives (GduDeviceTreeModel *model)
 
 /* ---------------------------------------------------------------------------------------------------- */
 
+static gboolean
+update_mdraid (GduDeviceTreeModel *model,
+               UDisksObject       *object,
+               gboolean            from_timer)
+{
+  UDisksObjectInfo *info = NULL;
+  UDisksMDRaid *mdraid = NULL;
+  UDisksBlock *block = NULL;
+  const gchar *name;
+  gchar *desc = NULL;
+  gchar *desc2 = NULL;
+  gchar *s = NULL;
+  gboolean warning = FALSE;
+  gboolean jobs_running = FALSE;
+  GtkTreeIter iter;
+  guint pulse;
+  guint64 size = 0;
+
+  if (!find_iter_for_object (model,
+                             object,
+                             &iter))
+    {
+      g_warning ("Error finding iter for object at %s",
+                 g_dbus_object_get_object_path (G_DBUS_OBJECT (object)));
+      goto out;
+    }
+
+  mdraid = udisks_object_peek_mdraid (object);
+  block = udisks_client_get_block_for_mdraid (model->client, mdraid);
+  info = udisks_client_get_object_info (model->client, object);
+
+  name = udisks_mdraid_get_name (mdraid);
+  /* skip homehost, if any */
+  s = strstr (name, ":");
+  if (s != NULL)
+    {
+      name = s + 1;
+      s = NULL;
+    }
+
+  size = udisks_mdraid_get_size (mdraid);
+  if (size > 0)
+    {
+      s = udisks_client_get_size_for_display (model->client, size, FALSE, FALSE);
+      /* Translators: Used in the device tree for a RAID Array, the first %s is the size */
+      desc = g_strdup_printf (C_("md-raid-tree-primary", "%s RAID Array"), s);
+      g_free (s);
+    }
+  else
+    {
+      /* Translators: Used in the device tree for a RAID Array where the size is not known  */
+      desc = g_strdup (C_("md-raid-tree-primary", "RAID Array"));
+    }
+
+
+  if (name != NULL && strlen (name) > 0)
+    {
+      s = gdu_utils_format_mdraid_level (udisks_mdraid_get_level (mdraid), FALSE, FALSE);
+      /* Translators: Used as a secondary line in device tree for RAID Array.
+       *              The first %s is the name of the array (e.g. "My RAID Array").
+       *              The second %s is the RAID level (e.g. "RAID-5").
+       */
+      desc2 = g_strdup_printf (C_("md-raid-tree-secondary", "%s (%s)"), name, s);
+      g_free (s);
+    }
+  else
+    {
+      desc2 = gdu_utils_format_mdraid_level (udisks_mdraid_get_level (mdraid), FALSE, FALSE);
+    }
+
+  if (udisks_mdraid_get_degraded (mdraid) > 0)
+    warning = TRUE;
+
+  if (warning)
+    {
+      /* TODO: once https://bugzilla.gnome.org/show_bug.cgi?id=657194 is resolved, use that instead
+       * of hard-coding the color
+       */
+      s = g_strdup_printf ("<span foreground=\"#ff0000\">%s</span>\n"
+                           "<small><span foreground=\"#ff0000\">%s</span></small>",
+                           desc,
+                           desc2);
+    }
+  else
+    {
+      s = g_strdup_printf ("%s\n"
+                           "<small>%s</small>",
+                           desc,
+                           desc2);
+    }
+
+  if (block != NULL)
+    size = udisks_block_get_size (block);
+
+  jobs_running = mdraid_has_jobs (model, mdraid);
+
+  /* also show the spinner if a sync op is in progress */
+  if (udisks_mdraid_get_sync_completed (mdraid) > 0.0)
+    jobs_running = TRUE;
+
+  gtk_tree_model_get (GTK_TREE_MODEL (model),
+                      &iter,
+                      GDU_DEVICE_TREE_MODEL_COLUMN_PULSE, &pulse,
+                      -1);
+  if (from_timer)
+    pulse += 1;
+
+  gtk_tree_store_set (GTK_TREE_STORE (model),
+                      &iter,
+                      GDU_DEVICE_TREE_MODEL_COLUMN_ICON, udisks_object_info_get_icon (info),
+                      GDU_DEVICE_TREE_MODEL_COLUMN_NAME, s,
+                      GDU_DEVICE_TREE_MODEL_COLUMN_SORT_KEY, udisks_object_info_get_sort_key (info),
+                      GDU_DEVICE_TREE_MODEL_COLUMN_WARNING, warning,
+                      GDU_DEVICE_TREE_MODEL_COLUMN_JOBS_RUNNING, jobs_running,
+                      GDU_DEVICE_TREE_MODEL_COLUMN_PULSE, pulse,
+                      GDU_DEVICE_TREE_MODEL_COLUMN_SIZE, size,
+                      GDU_DEVICE_TREE_MODEL_COLUMN_BLOCK, block,
+                      -1);
+
+  /* update spinner, if jobs are running */
+  if (jobs_running)
+    {
+      if (model->spinner_timeout == 0)
+        {
+          model->spinner_timeout = g_timeout_add (SPINNER_TIMEOUT_MSEC, on_spinner_timeout, model);
+        }
+    }
+
+ out:
+  g_clear_object (&info);
+  g_free (s);
+  g_free (desc);
+  g_free (desc2);
+  g_clear_object (&block);
+  return jobs_running;
+}
+
+static void
+update_mdraids (GduDeviceTreeModel *model)
+{
+  GDBusObjectManager *object_manager;
+  GList *objects;
+  GList *mdraids;
+  GList *added_mdraids;
+  GList *removed_mdraids;
+  GList *l;
+
+  object_manager = udisks_client_get_object_manager (model->client);
+  objects = g_dbus_object_manager_get_objects (object_manager);
+
+  mdraids = NULL;
+  for (l = objects; l != NULL; l = l->next)
+    {
+      UDisksObject *object = UDISKS_OBJECT (l->data);
+      UDisksMDRaid *mdraid;
+
+      mdraid = udisks_object_peek_mdraid (object);
+      if (mdraid == NULL)
+        continue;
+
+      mdraids = g_list_prepend (mdraids, g_object_ref (object));
+    }
+
+  mdraids = g_list_sort (mdraids, (GCompareFunc) _g_dbus_object_compare);
+  model->current_mdraids = g_list_sort (model->current_mdraids, (GCompareFunc) _g_dbus_object_compare);
+  diff_sorted_lists (model->current_mdraids,
+                     mdraids,
+                     (GCompareFunc) _g_dbus_object_compare,
+                     &added_mdraids,
+                     &removed_mdraids);
+
+  for (l = removed_mdraids; l != NULL; l = l->next)
+    {
+      UDisksObject *object = UDISKS_OBJECT (l->data);
+      g_assert (g_list_find (model->current_mdraids, object) != NULL);
+      model->current_mdraids = g_list_remove (model->current_mdraids, object);
+      remove_mdraid (model, object);
+      g_object_unref (object);
+    }
+  for (l = added_mdraids; l != NULL; l = l->next)
+    {
+      UDisksObject *object = UDISKS_OBJECT (l->data);
+      model->current_mdraids = g_list_prepend (model->current_mdraids, g_object_ref (object));
+      add_mdraid (model, object, get_mdraid_header_iter (model));
+    }
+
+  for (l = model->current_mdraids; l != NULL; l = l->next)
+    {
+      UDisksObject *object = UDISKS_OBJECT (l->data);
+      update_mdraid (model, object, FALSE);
+    }
+
+  if (g_list_length (model->current_mdraids) == 0)
+    nuke_mdraid_header (model);
+
+  g_list_free (added_mdraids);
+  g_list_free (removed_mdraids);
+  g_list_foreach (mdraids, (GFunc) g_object_unref, NULL);
+  g_list_free (mdraids);
+
+  g_list_foreach (objects, (GFunc) g_object_unref, NULL);
+  g_list_free (objects);
+}
+
+/* ---------------------------------------------------------------------------------------------------- */
+
 static GtkTreeIter *
 get_block_header_iter (GduDeviceTreeModel *model)
 {
   gchar *s;
-
-  if (model->flags & GDU_DEVICE_TREE_MODEL_FLAGS_FLAT)
-    return NULL;
 
   if (model->block_iter_valid)
     goto out;
@@ -1124,21 +1367,17 @@ update_block (GduDeviceTreeModel  *model,
     {
       gchar *backing_file_unfused;
       backing_file_unfused = gdu_utils_unfuse_path (loop_backing_file);
-      s = g_strdup_printf ("%s"
-                           "%s"
+      s = g_strdup_printf ("%s\n"
                            "<small>%s</small>",
                            udisks_object_info_get_description (info),
-                           model->flags & GDU_DEVICE_TREE_MODEL_FLAGS_ONE_LINE_NAME ? " — " : "\n",
                            backing_file_unfused);
       g_free (backing_file_unfused);
     }
   else
     {
-      s = g_strdup_printf ("%s"
-                           "%s"
+      s = g_strdup_printf ("%s\n"
                            "<small>%s</small>",
                            udisks_object_info_get_description (info),
-                           model->flags & GDU_DEVICE_TREE_MODEL_FLAGS_ONE_LINE_NAME ? " — " : "\n",
                            preferred_device);
     }
 
@@ -1163,7 +1402,7 @@ update_block (GduDeviceTreeModel  *model,
                       -1);
 
   /* update spinner, if jobs are running */
-  if (jobs_running && (model->flags & GDU_DEVICE_TREE_MODEL_FLAGS_UPDATE_PULSE))
+  if (jobs_running)
     {
       if (model->spinner_timeout == 0)
         {
@@ -1196,21 +1435,24 @@ should_include_block (UDisksObject *object)
   partition = udisks_object_peek_partition (object);
   loop = udisks_object_peek_loop (object);
 
-  if (gdu_utils_has_userspace_mount_option (block, "x-gdu.hide"))
-    goto out;
-
   /* RAM devices are useless */
   device = udisks_block_get_device (block);
   if (g_str_has_prefix (device, "/dev/ram"))
+    goto out;
+
+  /* MD-RAID devices (e.g. /dev/md0) with an associated org.fd.UDisks.MDRaid object are
+   * shown in their own section so don't show them here
+   */
+  if (g_strcmp0 (udisks_block_get_mdraid (block), "/") != 0)
     goto out;
 
   /* Don't show loop devices of size zero - they're unused.
    *
    * Do show any other block device of size 0.
    *
-   * Note that we _do_ want to show any other device of size 0 since
-   * that's a good hint that the system may be misconfigured and
-   * attention is needed.
+   * Note that we _do_ want to show any other device of size 0 (for
+   * exampleinactive MD-RAID devices) since that's a good hint that
+   * the system is misconfigured and attention is needed.
    */
   size = udisks_block_get_size (block);
   if (size == 0 && loop != NULL)
@@ -1312,6 +1554,7 @@ static void
 update_all (GduDeviceTreeModel *model)
 {
   /* TODO: if this is CPU intensive we could coalesce all updates / schedule timeouts */
+  update_mdraids (model);
   update_drives (model);
   update_blocks (model);
 }

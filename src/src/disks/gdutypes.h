@@ -46,9 +46,6 @@ typedef struct GduDVDSupport GduDVDSupport;
 struct GduLocalJob;
 typedef struct GduLocalJob GduLocalJob;
 
-struct GduXzDecompressor;
-typedef struct GduXzDecompressor GduXzDecompressor;
-
 G_END_DECLS
 
 #endif /* __GDU_TYPES_H__ */

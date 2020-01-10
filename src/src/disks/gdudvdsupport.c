@@ -131,7 +131,6 @@ gdu_dvd_support_new  (const gchar *device_file,
   GList *l;
   guint64 pos;
   GArray *a;
-  Range *prev_range;
 
   /* We use dlopen() to access libdvdcss since it's normally not
    * shipped (so we can't hard-depend on it) but it may be installed
@@ -207,7 +206,7 @@ gdu_dvd_support_new  (const gchar *device_file,
             }
           else
             {
-              snprintf (vob_filename, sizeof vob_filename, "/VIDEO_TS/VTS_%02u_%d.VOB", title, part);
+              snprintf (vob_filename, sizeof vob_filename, "/VIDEO_TS/VTS_%02d_%d.VOB", title, part);
             }
 
           vob_sector_offset = UDFFindFile (support->dvd, vob_filename, &vob_size);
@@ -229,11 +228,8 @@ gdu_dvd_support_new  (const gchar *device_file,
           range->end = range->start + rounded_vob_size;
           range->scrambled = TRUE;
 
-          if (G_UNLIKELY (support->debug))
-            {
-              g_print ("%s: %10" G_GUINT64_FORMAT " -> %10" G_GUINT64_FORMAT ": scrambled=%d\n",
-                       vob_filename, range->start, range->end, range->scrambled);
-            }
+          /*g_print ("%s: %10" G_GUINT64_FORMAT " -> %10" G_GUINT64_FORMAT ": scrambled=%d\n",
+            vob_filename, range->start, range->end, range->scrambled);*/
 
           scrambled_ranges = g_list_prepend (scrambled_ranges, range);
         }
@@ -243,43 +239,11 @@ gdu_dvd_support_new  (const gchar *device_file,
   if (scrambled_ranges == NULL)
     goto fail;
 
-  /* Otherwise, sort the ranges... */
+  /* Otherwise, build an array of ranges
+   *
+   * TODO: ensure ranges are not overlapping
+   */
   scrambled_ranges = g_list_sort (scrambled_ranges, (GCompareFunc) range_compare_func);
-
-  /* ... remove overlapping ranges ... */
-  prev_range = NULL;
-  l = scrambled_ranges;
-  while (l != NULL)
-    {
-      Range *range = l->data;
-      GList *next = l->next;
-
-      if (prev_range != NULL)
-        {
-          if (range->start >= prev_range->end)
-            {
-              prev_range = range;
-            }
-          else
-            {
-              if (G_UNLIKELY (support->debug))
-                {
-                  g_print ("Skipping overlapping range %" G_GUINT64_FORMAT " -> %" G_GUINT64_FORMAT " "
-                           "(Prev %" G_GUINT64_FORMAT " -> %" G_GUINT64_FORMAT ")\n",
-                           range->start, range->end, prev_range->start, prev_range->end);
-                }
-              scrambled_ranges = g_list_delete_link (scrambled_ranges, l);
-              g_free (range);
-            }
-        }
-      else
-        {
-          prev_range = range;
-        }
-      l = next;
-    }
-
-  /* ... and build an array of ranges covering the entire disc */
   a = g_array_new (FALSE, /* zero-terminated */
                    FALSE, /* clear */
                    sizeof (Range));
@@ -313,7 +277,7 @@ gdu_dvd_support_new  (const gchar *device_file,
       for (n = 0; n < support->num_ranges; n++)
         {
           Range *range = support->ranges + n;
-          g_print ("range %02u: %10" G_GUINT64_FORMAT " -> %10" G_GUINT64_FORMAT ": scrambled=%d\n",
+          g_print ("range %02d: %10" G_GUINT64_FORMAT " -> %10" G_GUINT64_FORMAT ": scrambled=%d\n",
                    n, range->start, range->end, range->scrambled);
         }
     }
@@ -405,7 +369,7 @@ gdu_dvd_support_read (GduDVDSupport *support,
 
       if (G_UNLIKELY (support->debug))
         {
-          g_print ("reading %" G_GUINT64_FORMAT " from %" G_GUINT64_FORMAT " (scrambled=%d) from range %u\n",
+          g_print ("reading %" G_GUINT64_FORMAT " from %" G_GUINT64_FORMAT " (scrambled=%d) from range %d\n",
                    num_to_read_in_range, cur_offset, r->scrambled, n);
         }
 

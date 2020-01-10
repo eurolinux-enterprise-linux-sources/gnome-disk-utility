@@ -9,7 +9,6 @@
 
 #include "config.h"
 
-#include <inttypes.h>
 #include <glib/gi18n.h>
 
 #include "gduapplication.h"
@@ -40,8 +39,10 @@ typedef struct
   GtkWidget *type_combobox;
   GtkWidget *name_entry;
   GtkWidget *system_checkbutton;
-  GtkWidget *hide_from_firmware_checkbutton;
   GtkWidget *bootable_checkbutton;
+  GtkWidget *readonly_checkbutton;
+  GtkWidget *hidden_checkbutton;
+  GtkWidget *do_not_automount_checkbutton;
 
 } EditPartitionData;
 
@@ -87,10 +88,14 @@ edit_partition_get (EditPartitionData   *data,
       name = g_strdup (gtk_entry_get_text (GTK_ENTRY (data->name_entry)));
       if (gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (data->system_checkbutton)))
         flags |= (1UL<<0);
-      if (gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (data->hide_from_firmware_checkbutton)))
-        flags |= (1UL<<1);
       if (gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (data->bootable_checkbutton)))
         flags |= (1UL<<2);
+      if (gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (data->readonly_checkbutton)))
+        flags |= (1UL<<60);
+      if (gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (data->hidden_checkbutton)))
+        flags |= (1UL<<62);
+      if (gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (data->do_not_automount_checkbutton)))
+        flags |= (1UL<<63);
     }
   else if (g_strcmp0 (data->partition_table_type, "dos") == 0)
     {
@@ -197,16 +202,9 @@ edit_partition_populate (EditPartitionData *data)
           cur_table_subtype = info->table_subtype;
         }
 
-#if UDISKS_CHECK_VERSION(2, 1, 1)
-      type_for_display = udisks_client_get_partition_type_and_subtype_for_display (client,
-                                                                                   data->partition_table_type,
-                                                                                   info->table_subtype,
-                                                                                   info->type);
-#else
       type_for_display = udisks_client_get_partition_type_for_display (client,
                                                                        data->partition_table_type,
                                                                        info->type);
-#endif
       escaped_type_for_display = g_markup_escape_text (type_for_display, -1);
       s = g_strdup_printf ("%s <span size=\"small\">(%s)</span>",
                            escaped_type_for_display,
@@ -246,8 +244,10 @@ edit_partition_populate (EditPartitionData *data)
       gtk_entry_set_text (GTK_ENTRY (data->name_entry), udisks_partition_get_name (data->partition));
       flags = udisks_partition_get_flags (data->partition);
       gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (data->system_checkbutton),           (flags & (1UL<< 0)) != 0);
-      gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (data->hide_from_firmware_checkbutton), (flags & (1UL<< 1)) != 0);
       gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (data->bootable_checkbutton),         (flags & (1UL<< 2)) != 0);
+      gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (data->readonly_checkbutton),         (flags & (1UL<<60)) != 0);
+      gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (data->hidden_checkbutton),           (flags & (1UL<<62)) != 0);
+      gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (data->do_not_automount_checkbutton), (flags & (1UL<<63)) != 0);
     }
   else if (g_strcmp0 (data->partition_table_type, "dos") == 0)
     {
@@ -285,17 +285,21 @@ gdu_partition_dialog_show (GduWindow    *window,
                                                              &data->builder));
       data->name_entry = GTK_WIDGET (gtk_builder_get_object (data->builder, "name-entry"));
       data->system_checkbutton = GTK_WIDGET (gtk_builder_get_object (data->builder, "system-checkbutton"));
-      data->hide_from_firmware_checkbutton = GTK_WIDGET (gtk_builder_get_object (data->builder,
-                                                                                 "hide-from-firmware-checkbutton"));
       data->bootable_checkbutton = GTK_WIDGET (gtk_builder_get_object (data->builder, "bootable-checkbutton"));
-
+      data->readonly_checkbutton = GTK_WIDGET (gtk_builder_get_object (data->builder, "readonly-checkbutton"));
+      data->hidden_checkbutton = GTK_WIDGET (gtk_builder_get_object (data->builder, "hidden-checkbutton"));
+      data->do_not_automount_checkbutton = GTK_WIDGET (gtk_builder_get_object (data->builder, "do-not-automount-checkbutton"));
       g_signal_connect (data->name_entry,
                         "notify::text", G_CALLBACK (edit_partition_property_changed), data);
       g_signal_connect (data->system_checkbutton,
                         "notify::active", G_CALLBACK (edit_partition_property_changed), data);
-      g_signal_connect (data->hide_from_firmware_checkbutton,
-                        "notify::active", G_CALLBACK (edit_partition_property_changed), data);
       g_signal_connect (data->bootable_checkbutton,
+                        "notify::active", G_CALLBACK (edit_partition_property_changed), data);
+      g_signal_connect (data->readonly_checkbutton,
+                        "notify::active", G_CALLBACK (edit_partition_property_changed), data);
+      g_signal_connect (data->hidden_checkbutton,
+                        "notify::active", G_CALLBACK (edit_partition_property_changed), data);
+      g_signal_connect (data->do_not_automount_checkbutton,
                         "notify::active", G_CALLBACK (edit_partition_property_changed), data);
     }
   else if (g_strcmp0 (data->partition_table_type, "dos") == 0)

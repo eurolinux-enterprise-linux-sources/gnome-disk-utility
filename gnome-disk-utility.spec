@@ -1,37 +1,58 @@
-Name:          gnome-disk-utility
-Version:       3.28.3
-Release:       1%{?dist}
-Summary:       Disks
+%define glib2_version                 2.31.0
+%define gtk3_version                  3.5.8
+%define udisks_version                2.1.0
+%define gnome_settings_daemon_version 3.7.3
 
-License:       GPLv2+
-URL:           https://git.gnome.org/browse/gnome-disk-utility
-Source0:       https://download.gnome.org/sources/%{name}/3.28/%{name}-%{version}.tar.xz
-# Fix the build with Python 2
-Patch0:        gnome-disk-utility-python2.patch
-# Fix the build with RHEL 7 gcc that doesn't use c99 by default
-Patch1:        gnome-disk-utility-c99.patch
-# Define __USE_XOPEN to get M_PI from math.h with RHEL 7 glibc
-Patch2:        gnome-disk-utility-m_pi.patch
+# Only enable if using patches that touches configure.ac,
+# Makefile.am or other build system related files
+#
+%define enable_autoreconf 0
 
-BuildRequires: /usr/bin/appstream-util
-BuildRequires: desktop-file-utils
-BuildRequires: docbook-style-xsl
+Summary: Disks
+Name: gnome-disk-utility
+Version: 3.8.2
+Release: 1%{?dist}
+License: GPLv2+
+Group: System Environment/Libraries
+URL: http://git.gnome.org/browse/gnome-disk-utility
+Source0: http://download.gnome.org/sources/gnome-disk-utility/3.8/%{name}-%{version}.tar.xz
+# https://bugzilla.gnome.org/show_bug.cgi?id=701457
+Patch0: gnome-disk-utility-3.8.2-format.patch
+
+BuildRequires: glib2-devel >= %{glib2_version}
+BuildRequires: gtk3-devel >= %{gtk3_version}
+BuildRequires: gnome-settings-daemon-devel >= %{gnome_settings_daemon_version}
 BuildRequires: gettext
+BuildRequires: desktop-file-utils
+BuildRequires: libudisks2-devel >= %{udisks_version}
+BuildRequires: gnome-common
+BuildRequires: intltool
+BuildRequires: libsecret-devel
+BuildRequires: systemd-devel
 # for xsltproc
 BuildRequires: libxslt
-BuildRequires: meson
-BuildRequires: pkgconfig(dvdread)
-BuildRequires: pkgconfig(glib-2.0)
-BuildRequires: pkgconfig(gtk+-3.0)
-BuildRequires: pkgconfig(libcanberra-gtk3)
-BuildRequires: pkgconfig(liblzma)
-BuildRequires: pkgconfig(libnotify)
-BuildRequires: pkgconfig(libsecret-1)
-BuildRequires: pkgconfig(libsystemd)
-BuildRequires: pkgconfig(pwquality)
-BuildRequires: pkgconfig(udisks2)
+BuildRequires: docbook-style-xsl
+BuildRequires: libpwquality-devel
+BuildRequires: libcanberra-devel
+BuildRequires: libdvdread-devel
+BuildRequires: libnotify-devel
 
-Requires:      udisks2
+Requires: gnome-icon-theme-symbolic
+Requires: udisks2
+
+Obsoletes: gnome-disk-utility-format
+Obsoletes: nautilus-gdu
+Obsoletes: gnome-disk-utility-libs
+Obsoletes: gnome-disk-utility-devel
+Obsoletes: gnome-disk-utility-ui-libs
+Obsoletes: gnome-disk-utility-ui-devel
+Obsoletes: gnome-disk-utility-nautilus
+
+%if 0%{?enable_autoreconf}
+BuildRequires: autoconf
+BuildRequires: automake
+BuildRequires: libtool
+%endif
 
 %description
 This package contains the Disks and Disk Image Mounter applications.
@@ -39,94 +60,73 @@ Disks supports partitioning, file system creation, encryption,
 fstab/crypttab editing, ATA SMART and other features
 
 %prep
-%autosetup -p1
-
+%setup -q
+%patch0 -p1 -b .format
 
 %build
-%meson
-%meson_build
-
+%if 0%{?enable_autoreconf}
+autoreconf
+%endif
+%configure
+make %{?_smp_mflags}
 
 %install
-%meson_install
+make install DESTDIR=$RPM_BUILD_ROOT
+
+rm -f $RPM_BUILD_ROOT%{_libdir}/gnome-settings-daemon-3.0/*.la
+rm -f $RPM_BUILD_ROOT%{_libdir}/gnome-settings-daemon-3.0/*.a
+
+desktop-file-install --delete-original  \
+  --dir $RPM_BUILD_ROOT%{_datadir}/applications \
+  $RPM_BUILD_ROOT%{_datadir}/applications/gnome-disks.desktop \
+  $RPM_BUILD_ROOT%{_datadir}/applications/gnome-disk-image-mounter.desktop
+
 %find_lang %{name}
 
-
-%check
-appstream-util validate-relax --nonet %{buildroot}%{_datadir}/metainfo/org.gnome.DiskUtility.appdata.xml
-desktop-file-validate %{buildroot}%{_datadir}/applications/*.desktop
-
-
 %post
-touch --no-create %{_datadir}/icons/hicolor &>/dev/null || :
-update-desktop-database %{_datadir}/applications &> /dev/null || :
-
+for d in hicolor HighContrast ; do
+    touch --no-create %{_datadir}/icons/$d &>/dev/null || :
+done
+update-desktop-database %{_datadir}/applications &> /dev/null
 
 %postun
-update-desktop-database %{_datadir}/applications &> /dev/null || :
+update-desktop-database %{_datadir}/applications &> /dev/null
 if [ $1 -eq 0 ] ; then
     glib-compile-schemas %{_datadir}/glib-2.0/schemas &>/dev/null || :
-    touch --no-create %{_datadir}/icons/hicolor &>/dev/null || :
-    gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
+    for d in hicolor HighContrast ; do
+        touch --no-create %{_datadir}/icons/$d &>/dev/null || :
+        gtk-update-icon-cache %{_datadir}/icons/$d &>/dev/null || :
+    done
 fi
-
 
 %posttrans
 glib-compile-schemas %{_datadir}/glib-2.0/schemas &>/dev/null || :
-gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
+for d in hicolor HighContrast ; do
+    gtk-update-icon-cache %{_datadir}/icons/$d &>/dev/null || :
+done
 
 
 %files -f %{name}.lang
-%doc AUTHORS NEWS README
-%license COPYING
 %{_bindir}/gnome-disks
 %{_bindir}/gnome-disk-image-mounter
-%{_datadir}/applications/org.gnome.DiskUtility.desktop
+%{_datadir}/applications/gnome-disks.desktop
 %{_datadir}/applications/gnome-disk-image-mounter.desktop
-%{_datadir}/applications/gnome-disk-image-writer.desktop
-%{_datadir}/dbus-1/services/org.gnome.DiskUtility.service
 %{_datadir}/glib-2.0/schemas/org.gnome.Disks.gschema.xml
-%{_datadir}/icons/hicolor/*/apps/gnome-disks*
-%{_datadir}/metainfo/org.gnome.DiskUtility.appdata.xml
-%{_mandir}/man1/*
-%{_sysconfdir}/xdg/autostart/org.gnome.SettingsDaemon.DiskUtilityNotify.desktop
-%{_libexecdir}/gsd-disk-utility-notify
+%{_datadir}/glib-2.0/schemas/org.gnome.settings-daemon.plugins.gdu-sd.gschema.xml
 
+%dir %{_datadir}/gnome-disk-utility
+%{_datadir}/gnome-disk-utility/*.ui
+%{_datadir}/icons/hicolor/*/apps/gnome-disks*
+%{_datadir}/icons/HighContrast/*/apps/gnome-disks.png
+
+%{_mandir}/man1/*
+
+%{_libdir}/gnome-settings-daemon-3.0/gdu-sd-plugin.gnome-settings-plugin
+%{_libdir}/gnome-settings-daemon-3.0/libgdu-sd.so
+
+%doc README AUTHORS NEWS COPYING
 
 %changelog
-* Fri Jun 01 2018 Kalev Lember <klember@redhat.com> - 3.28.3-1
-- Update to 3.28.3
-- Resolves: #1568170
-
-* Tue May 08 2018 Kalev Lember <klember@redhat.com> - 3.28.2-1
-- Update to 3.28.2
-- Resolves: #1568170
-
-* Thu Nov 24 2016 Kalev Lember <klember@redhat.com> - 3.22.1-1
-- Update to 3.22.1
-- Resolves: #1386891
-
-* Fri May 22 2015 Matthias Clasen <mclasen@redhat.com> - 3.14.0-2
-- Remove deprecated keys from desktop files
-Related: #1174596
-
-* Mon Mar 23 2015 Richard Hughes <rhughes@redhat.com> - 3.14.0-1
-- Update to 3.14.0
-- Resolves: #1174596
-
-* Fri Jan 24 2014 Daniel Mach <dmach@redhat.com> - 3.8.2-5
-- Mass rebuild 2014-01-24
-
-* Fri Jan 10 2014 Matthias Clasen <mclasen@redhat.com> - 3.8.2-4
-- Make formatting usb drives from nautilus work again
-Resolves: #1051664
-
-* Thu Jan  9 2014 Zeeshan Ali <zeenix@redhat.com> - 3.8.2-3
-- Complete translations (#1030339).
-
-* Fri Dec 27 2013 Daniel Mach <dmach@redhat.com> - 3.8.2-2
-- Mass rebuild 2013-12-27
-
 * Sun Jun 02 2013 Kalev Lember <kalevlember@gmail.com> - 3.8.2-1
 - Update to 3.8.2
 

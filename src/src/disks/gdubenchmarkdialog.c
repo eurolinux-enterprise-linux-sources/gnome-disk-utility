@@ -247,11 +247,6 @@ on_drawing_area_draw (GtkWidget      *widget,
   gdouble access_time_max = 0.0;
   gdouble prev_x;
   gdouble prev_y;
-  GtkStyleContext *context;
-  PangoFontDescription *font_desc;
-  gint size;
-  GdkRGBA fg;
-  PangoLayout *layout;
 
   G_LOCK (bm_lock);
 
@@ -346,6 +341,9 @@ on_drawing_area_draw (GtkWidget      *widget,
   width = allocation.width;
   height = allocation.height;
 
+  cairo_select_font_face (cr, "sans",
+                          CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+  cairo_set_font_size (cr, 8.0);
   cairo_set_line_width (cr, 1.0);
 
 #if 0
@@ -410,38 +408,23 @@ on_drawing_area_draw (GtkWidget      *widget,
       gh -= needed;
     }
 
-  context = gtk_widget_get_style_context (widget);
-  gtk_style_context_get_color (context, GTK_STATE_FLAG_NORMAL, &fg);
-  gtk_style_context_get (context,
-                         GTK_STATE_FLAG_NORMAL,
-                         GTK_STYLE_PROPERTY_FONT,
-                         &font_desc,
-                         NULL);
-  size = pango_font_description_get_size (font_desc);
-  if (pango_font_description_get_size_is_absolute (font_desc))
-    size *= PANGO_SCALE;
-  pango_font_description_set_size (font_desc, PANGO_SCALE_X_SMALL * size);
-  layout = pango_cairo_create_layout (cr);
-  pango_layout_set_font_description (layout, font_desc);
-  pango_font_description_free (font_desc);
-
   /* draw x markers ("%d%%") + vertical grid */
   for (n = 0; n <= 10; n++)
     {
-      PangoRectangle extents;
+      cairo_text_extents_t te;
 
       x = gx + ceil (n * gw / 10.0);
       y = gy + gh + x_marker_height/2.0;
 
-      s = g_strdup_printf ("%u%%", n * 10);
+      s = g_strdup_printf ("%d%%", n * 10);
 
-      pango_layout_set_text (layout, s, -1);
-      pango_layout_get_extents (layout, NULL, &extents);
+      cairo_text_extents (cr, s, &te);
+
       cairo_move_to (cr,
-                     x - extents.width/PANGO_SCALE/2,
-                     y - extents.height/PANGO_SCALE/2);
-      gdk_cairo_set_source_rgba (cr, &fg);
-      pango_cairo_show_layout (cr, layout);
+                     x - te.x_bearing - te.width/2,
+                     y - te.y_bearing - te.height/2);
+      cairo_set_source_rgb (cr, 0, 0, 0);
+      cairo_show_text (cr, s);
 
       g_free (s);
     }
@@ -449,40 +432,36 @@ on_drawing_area_draw (GtkWidget      *widget,
   /* draw left y markers ("%d MB/s") */
   for (n = 0; n <= num_y_markers; n++)
     {
-      PangoRectangle extents;
+      cairo_text_extents_t te;
 
       x = gx/2.0;
       y = gy + gh - gh * n / num_y_markers;
 
       s = y_left_markers[n];
-      pango_layout_set_text (layout, s, -1);
-      pango_layout_get_extents (layout, NULL, &extents);
+      cairo_text_extents (cr, s, &te);
       cairo_move_to (cr,
-                     x - extents.width/PANGO_SCALE/2,
-                     y - extents.height/PANGO_SCALE/2);
-      gdk_cairo_set_source_rgba (cr, &fg);
-      pango_cairo_show_layout (cr, layout);
+                     x - te.x_bearing - te.width/2,
+                     y - te.y_bearing - te.height/2);
+      cairo_set_source_rgb (cr, 0, 0, 0);
+      cairo_show_text (cr, s);
     }
 
   /* draw right y markers ("%d ms") */
   for (n = 0; n <= num_y_markers; n++)
     {
-      PangoRectangle extents;
+      cairo_text_extents_t te;
 
       x = gx + gw + (width - (gx + gw))/2.0;
       y = gy + gh - gh * n / num_y_markers;
 
       s = y_right_markers[n];
-      pango_layout_set_text (layout, s, -1);
-      pango_layout_get_extents (layout, NULL, &extents);
+      cairo_text_extents (cr, s, &te);
       cairo_move_to (cr,
-                     x - extents.width/PANGO_SCALE/2,
-                     y - extents.height/PANGO_SCALE/2);
-      gdk_cairo_set_source_rgba (cr, &fg);
-      pango_cairo_show_layout (cr, layout);
+                     x - te.x_bearing - te.width/2,
+                     y - te.y_bearing - te.height/2);
+      cairo_set_source_rgb (cr, 0, 0, 0);
+      cairo_show_text (cr, s);
     }
-
-  g_object_unref (layout);
 
   /* fill graph area */
   cairo_set_source_rgb (cr, 1, 1, 1);
@@ -673,8 +652,8 @@ format_transfer_rate_and_num_samples (gdouble bytes_per_sec,
 
   s = format_transfer_rate (bytes_per_sec);
   s2 = g_strdup_printf (g_dngettext (GETTEXT_PACKAGE,
-                                     "%u sample",
-                                     "%u samples",
+                                     "%d sample",
+                                     "%d samples",
                                      num_samples),
                         num_samples);
   ret = g_strdup_printf ("%s <small>(%s)</small>", s, s2);
@@ -747,9 +726,6 @@ update_updated_label (DialogData *data)
       gtk_label_set_markup (GTK_LABEL (data->updated_label), s);
       g_free (s);
       break;
-
-    default:
-      g_assert_not_reached ();
     }
   G_UNLOCK (bm_lock);
 }
@@ -885,8 +861,8 @@ update_dialog (DialogData *data)
       /* Translators: %d is number of milliseconds and msec means "milli-second" */
       s2 = g_strdup_printf (C_("benchmark-access-time", "%.2f msec"), access_time_avg * 1000.0);
       s3 = g_strdup_printf (g_dngettext (GETTEXT_PACKAGE,
-                                         "%u sample",
-                                         "%u samples",
+                                         "%d sample",
+                                         "%d samples",
                                          data->bm_access_time_samples->len),
                             data->bm_access_time_samples->len);
       s = g_strdup_printf ("%s <small>(%s)</small>", s2, s3);
@@ -1168,16 +1144,8 @@ benchmark_thread (gpointer user_data)
   long page_size;
   guint64 disk_size;
   GVariantBuilder options_builder;
-  guint inhibit_cookie;
 
   //g_print ("bm thread start\n");
-
-  inhibit_cookie = gtk_application_inhibit (GTK_APPLICATION (gdu_window_get_application (data->window)),
-                                            GTK_WINDOW (data->dialog),
-                                            GTK_APPLICATION_INHIBIT_SUSPEND |
-                                            GTK_APPLICATION_INHIBIT_LOGOUT,
-                                            /* Translators: Reason why suspend/logout is being inhibited */
-                                            _("Benchmark"));
 
   g_variant_builder_init (&options_builder, G_VARIANT_TYPE_VARDICT);
   g_variant_builder_add (&options_builder, "{sv}", "writable", g_variant_new_boolean (data->bm_do_write));
@@ -1448,9 +1416,6 @@ benchmark_thread (gpointer user_data)
   data->bm_thread = NULL;
   data->bm_state = BM_STATE_NONE;
 
-  if (inhibit_cookie > 0)
-    gtk_application_uninhibit (GTK_APPLICATION (gdu_window_get_application (data->window)), inhibit_cookie);
-
   if (error != NULL)
     {
       G_LOCK (bm_lock);
@@ -1660,10 +1625,6 @@ gdu_benchmark_dialog_show (GduWindow    *window,
     {
       gint response;
       response = gtk_dialog_run (GTK_DIALOG (data->dialog));
-
-      if (response < 0)
-        break;
-
       /* Keep in sync with .ui file */
       switch (response)
         {
@@ -1674,10 +1635,10 @@ gdu_benchmark_dialog_show (GduWindow    *window,
         case 1: /* abort benchmark */
           abort_benchmark (data);
           break;
-
-        default:
-          g_assert_not_reached ();
         }
+
+      if (response < 0)
+        break;
     }
 
   g_source_remove (timeout_id);

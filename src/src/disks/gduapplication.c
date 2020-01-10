@@ -17,15 +17,15 @@
 #include <unistd.h>
 
 #include "gduapplication.h"
-#include "gducreateformatdialog.h"
-#include "gdurestorediskimagedialog.h"
-#include "gdunewdiskimagedialog.h"
+#include "gduformatvolumedialog.h"
 #include "gduwindow.h"
 #include "gdulocaljob.h"
 
 struct _GduApplication
 {
   GtkApplication parent_instance;
+
+  gboolean running_from_source_tree;
 
   UDisksClient *client;
   GduWindow *window;
@@ -41,14 +41,10 @@ typedef struct
 
 G_DEFINE_TYPE (GduApplication, gdu_application, GTK_TYPE_APPLICATION);
 
-static void gdu_application_set_options (GduApplication *app);
-
 static void
 gdu_application_init (GduApplication *app)
 {
   app->local_jobs = g_hash_table_new (g_direct_hash, g_direct_equal);
-
-  gdu_application_set_options (app);
 }
 
 static void
@@ -76,34 +72,25 @@ gdu_application_finalize (GObject *object)
   G_OBJECT_CLASS (gdu_application_parent_class)->finalize (object);
 }
 
+/* ---------------------------------------------------------------------------------------------------- */
 
-gboolean
-gdu_application_should_exit (GduApplication *app)
+/* called in local instance */
+static gboolean
+gdu_application_local_command_line (GApplication    *_app,
+                                    gchar         ***arguments,
+                                    int             *exit_status)
 {
-  GtkWidget *dialog;
-  gint response;
+  GduApplication *app = GDU_APPLICATION (_app);
 
-  if (app->local_jobs != NULL && g_hash_table_size (app->local_jobs) != 0)
-    {
-      dialog = gtk_message_dialog_new (GTK_WINDOW (app->window),
-                                       GTK_DIALOG_DESTROY_WITH_PARENT,
-                                       GTK_MESSAGE_WARNING,
-                                       GTK_BUTTONS_OK_CANCEL,
-                                       _("Stop running jobs?"));
-      gtk_message_dialog_format_secondary_text (GTK_MESSAGE_DIALOG (dialog),
-                                                _("Closing now stops the running jobs and leads to a corrupt result."));
+  /* figure out if running from source tree */
+  if (g_strcmp0 ((*arguments)[0], "./gnome-disks") == 0)
+    app->running_from_source_tree = TRUE;
 
-      response = gtk_dialog_run (GTK_DIALOG (dialog));
-      gtk_widget_destroy (dialog);
-
-      if (response != GTK_RESPONSE_OK)
-        return FALSE;
-
-    }
-
-  return TRUE;
+  /* chain up */
+  return G_APPLICATION_CLASS (gdu_application_parent_class)->local_command_line (_app,
+                                                                                 arguments,
+                                                                                 exit_status);
 }
-
 
 /* ---------------------------------------------------------------------------------------------------- */
 
@@ -141,14 +128,14 @@ gdu_application_object_from_block_device (GduApplication *app,
 
   if (stat (block_device, &statbuf) != 0)
     {
-      *error_message = g_strdup_printf (_("Error opening %s: %s"), block_device, g_strerror (errno));
+      *error_message = g_strdup_printf (_("Error opening %s: %s\n"), block_device, g_strerror (errno));
       goto out;
     }
 
   block = udisks_client_get_block_for_dev (app->client, statbuf.st_rdev);
   if (block == NULL)
     {
-      *error_message = g_strdup_printf (_("Error looking up block device for %s"), block_device);
+      *error_message = g_strdup_printf (_("Error looking up block device for %s\n"), block_device);
       goto out;
     }
 
@@ -169,20 +156,6 @@ gdu_application_object_from_block_device (GduApplication *app,
 
 /* ---------------------------------------------------------------------------------------------------- */
 
-static GOptionEntry opt_entries[] = {
-    {"block-device", 0, 0, G_OPTION_ARG_STRING, NULL, N_("Select device"), "DEVICE" },
-    {"format-device", 0, 0, G_OPTION_ARG_NONE, NULL, N_("Format selected device"), NULL },
-    {"xid", 0, 0, G_OPTION_ARG_INT, NULL, N_("Parent window XID for the format dialog"), "ID" },
-    {"restore-disk-image", 0, 0, G_OPTION_ARG_FILENAME, NULL, N_("Restore disk image"), "FILE" },
-    {NULL}
-};
-
-static void
-gdu_application_set_options (GduApplication *app)
-{
-  g_application_add_main_option_entries (G_APPLICATION (app), opt_entries);
-}
-
 /* called in primary instance */
 static gint
 gdu_application_command_line (GApplication            *_app,
@@ -190,21 +163,48 @@ gdu_application_command_line (GApplication            *_app,
 {
   GduApplication *app = GDU_APPLICATION (_app);
   UDisksObject *object_to_select = NULL;
+  GOptionContext *context;
+  gchar **argv = NULL;
+  GError *error = NULL;
+  gint argc;
   gint ret = 1;
-  const gchar *opt_block_device = NULL;
-  gchar *error_message = NULL;
+  gchar *s;
+  gchar *opt_block_device = NULL, *error_message = NULL;
+  gboolean opt_help = FALSE;
   gboolean opt_format = FALSE;
-  const gchar *opt_restore_disk_image = NULL;
   gint opt_xid = -1;
-  GVariantDict *options;
+  GOptionEntry opt_entries[] =
+  {
+    {"block-device", 0, 0, G_OPTION_ARG_STRING, &opt_block_device, N_("Select device"), NULL },
+    {"format-device", 0, 0, G_OPTION_ARG_NONE, &opt_format, N_("Format selected device"), NULL },
+    {"xid", 0, 0, G_OPTION_ARG_INT, &opt_xid, N_("Parent window XID for the format dialog"), NULL },
+    {"help", '?', G_OPTION_FLAG_HIDDEN, G_OPTION_ARG_NONE, &opt_help, N_("Show help options"), NULL },
+    {NULL}
+  };
 
-  options = g_application_command_line_get_options_dict (command_line);
+  argv = g_application_command_line_get_arguments (command_line, &argc);
 
-  g_variant_dict_lookup (options, "block-device", "&s", &opt_block_device);
-  g_variant_dict_lookup (options, "format-device", "b", &opt_format);
-  g_variant_dict_lookup (options, "xid", "i", &opt_xid);
-  g_variant_dict_lookup (options, "restore-disk-image", "^&ay", &opt_restore_disk_image);
- 
+  context = g_option_context_new (NULL);
+  /* This is to avoid the primary instance calling exit() when encountering the "--help" option */
+  g_option_context_set_help_enabled (context, FALSE);
+  g_option_context_add_main_entries (context, opt_entries, GETTEXT_PACKAGE);
+
+  if (!g_option_context_parse (context, &argc, &argv, &error))
+    {
+      g_application_command_line_printerr (command_line, "%s\n", error->message);
+      g_clear_error (&error);
+      goto out;
+    }
+
+  if (opt_help)
+    {
+      s = g_option_context_get_help (context, FALSE, NULL);
+      g_application_command_line_print (command_line, "%s",  s);
+      g_free (s);
+      ret = 0;
+      goto out;
+    }
+
   if (opt_format && opt_block_device == NULL)
     {
       g_application_command_line_printerr (command_line, _("--format-device must be used together with --block-device\n"));
@@ -224,19 +224,8 @@ gdu_application_command_line (GApplication            *_app,
       object_to_select = gdu_application_object_from_block_device (app, opt_block_device, &error_message);
       if (object_to_select == NULL)
         {
-          g_application_command_line_printerr (command_line, "%s\n", error_message);
+          g_application_command_line_print (command_line, "%s", error_message);
           g_free (error_message);
-          goto out;
-        }
-    }
-
-  if (opt_restore_disk_image != NULL)
-    {
-      if (!g_file_test (opt_restore_disk_image, G_FILE_TEST_IS_REGULAR))
-        {
-          g_application_command_line_printerr (command_line,
-                                               "%s does not appear to be a regular file\n",
-                                               opt_restore_disk_image);
           goto out;
         }
     }
@@ -257,26 +246,22 @@ gdu_application_command_line (GApplication            *_app,
         {
           gdu_window_select_object (app->window, object_to_select);
           if (opt_format)
-            gdu_create_format_show (app->client, GTK_WINDOW (app->window), object_to_select,
-                                    FALSE, FALSE, 0, 0, NULL, NULL);
+            gdu_format_volume_dialog_show (app->window, object_to_select);
         }
     }
   else if (opt_format)
     {
-      g_application_hold (_app);
-      gdu_create_format_show (app->client, NULL, object_to_select,
-                              FALSE, FALSE, 0, 0, (GCallback) g_application_release, _app);
+      gdu_format_volume_dialog_show_for_xid (app->client, opt_xid, object_to_select);
     }
 
-  if (opt_restore_disk_image != NULL)
-    {
-      gdu_restore_disk_image_dialog_show (app->window, NULL, opt_restore_disk_image);
-    }
 
   ret = 0;
 
  out:
+  g_option_context_free (context);
   g_clear_object (&object_to_select);
+  g_free (opt_block_device);
+  g_strfreev (argv);
   return ret;
 }
 
@@ -296,15 +281,6 @@ gdu_application_activate (GApplication *_app)
 }
 
 /* ---------------------------------------------------------------------------------------------------- */
-
-static void
-new_disk_image_activated (GSimpleAction *action,
-                          GVariant      *parameter,
-                          gpointer       user_data)
-{
-  GduApplication *app = GDU_APPLICATION (user_data);
-  gdu_new_disk_image_dialog_show (app->window);
-}
 
 static void
 attach_disk_image_activated (GSimpleAction *action,
@@ -356,9 +332,7 @@ quit_activated (GSimpleAction *action,
                 gpointer       user_data)
 {
   GduApplication *app = GDU_APPLICATION (user_data);
-
-  if (gdu_application_should_exit (app))
-    gtk_widget_destroy (GTK_WIDGET (app->window));
+  gtk_widget_destroy (GTK_WIDGET (app->window));
 }
 
 static void
@@ -366,16 +340,16 @@ help_activated (GSimpleAction *action,
                 GVariant      *parameter,
                 gpointer       user_data)
 {
-  GduApplication *app = GDU_APPLICATION (user_data);
-  gtk_show_uri_on_window (GTK_WINDOW (app->window),
-                          "help:gnome-help/disk",
-                          GDK_CURRENT_TIME,
-                          NULL); /* GError */
+  //GduApplication *app = GDU_APPLICATION (user_data);
+  //gtk_widget_destroy (GTK_WIDGET (app->window));
+  gtk_show_uri (NULL, /* GdkScreen */
+                "help:gnome-help/disk",
+                GDK_CURRENT_TIME,
+                NULL); /* GError */
 }
 
 static GActionEntry app_entries[] =
 {
-  { "new_disk_image", new_disk_image_activated, NULL, NULL, NULL },
   { "attach_disk_image", attach_disk_image_activated, NULL, NULL, NULL },
   { "about", about_activated, NULL, NULL, NULL },
   { "help", help_activated, NULL, NULL, NULL },
@@ -415,14 +389,16 @@ gdu_application_class_init (GduApplicationClass *klass)
   gobject_class->finalize = gdu_application_finalize;
 
   application_class = G_APPLICATION_CLASS (klass);
+  application_class->local_command_line = gdu_application_local_command_line;
   application_class->command_line = gdu_application_command_line;
-  application_class->activate     = gdu_application_activate;
-  application_class->startup      = gdu_application_startup;
+  application_class->activate           = gdu_application_activate;
+  application_class->startup            = gdu_application_startup;
 }
 
 GApplication *
 gdu_application_new (void)
 {
+  gtk_init (NULL, NULL);
   return G_APPLICATION (g_object_new (GDU_TYPE_APPLICATION,
                                       "application-id", "org.gnome.DiskUtility",
                                       "flags", G_APPLICATION_HANDLES_COMMAND_LINE,
@@ -452,10 +428,14 @@ gdu_application_new_widget (GduApplication  *application,
 
   builder = gtk_builder_new ();
 
-  path = g_strdup_printf ("/org/gnome/Disks/ui/%s", ui_file);
+  path = g_strdup_printf ("%s/%s",
+                          application->running_from_source_tree ?
+                            "../../data/ui" :
+                            PACKAGE_DATA_DIR "/gnome-disk-utility",
+                          ui_file);
 
   error = NULL;
-  if (gtk_builder_add_from_resource (builder, path, &error) == 0)
+  if (gtk_builder_add_from_file (builder, path, &error) == 0)
     {
       g_error ("Error loading UI file %s: %s", path, error->message);
       g_error_free (error);
@@ -561,67 +541,3 @@ gdu_application_get_local_jobs_for_object (GduApplication *application,
 }
 
 /* ---------------------------------------------------------------------------------------------------- */
-
-gboolean
-gdu_application_has_running_job (GduApplication *application,
-                                 UDisksObject   *object)
-{
-  UDisksClient *client;
-  GList *l;
-  GList *jobs = NULL;
-  GList *objects_to_check = NULL;
-  gboolean ret = FALSE;
-
-  client = gdu_application_get_client (application);
-  objects_to_check = gdu_utils_get_all_contained_objects (client, object);
-  objects_to_check = g_list_prepend (objects_to_check, g_object_ref (object));
-
-  for (l = objects_to_check; l != NULL; l = l->next)
-    {
-      UDisksObject *object_iter = UDISKS_OBJECT (l->data);
-      UDisksEncrypted *encrypted_for_object;
-
-      jobs = udisks_client_get_jobs_for_object (client, object_iter);
-      if (jobs != NULL)
-        {
-          ret = TRUE;
-          break;
-        }
-
-      jobs = gdu_application_get_local_jobs_for_object (application, object_iter);
-      if (jobs != NULL)
-        {
-          ret = TRUE;
-          break;
-        }
-
-      encrypted_for_object = udisks_object_peek_encrypted (object_iter);
-      if (encrypted_for_object != NULL)
-        {
-          UDisksBlock *block_for_object;
-          UDisksBlock *cleartext;
-
-          block_for_object = udisks_object_peek_block (object_iter);
-          cleartext = udisks_client_get_cleartext_block (client, block_for_object);
-          if (cleartext != NULL)
-            {
-              UDisksObject *cleartext_object;
-
-              cleartext_object = (UDisksObject *) g_dbus_interface_get_object (G_DBUS_INTERFACE (cleartext));
-              g_object_unref (cleartext);
-
-              ret = gdu_application_has_running_job (application, cleartext_object);
-              if (ret)
-                break;
-            }
-        }
-
-    }
-
-  g_list_foreach (jobs, (GFunc) g_object_unref, NULL);
-  g_list_free (jobs);
-  g_list_free_full (objects_to_check, g_object_unref);
-
-  return ret;
-}
-

@@ -39,7 +39,6 @@ typedef struct
   GtkWidget *symbolic_icon_entry;
 
   GVariant *orig_fstab_entry;
-  gboolean is_swap;
 } FstabDialogData;
 
 static void
@@ -147,12 +146,12 @@ update_device_explanation (FstabDialogData *data)
   part_num = 0;
   s = g_strrstr (fsname, "-part");
   if (s != NULL)
-    sscanf (s, "-part%u", &part_num);
+    sscanf (s, "-part%d", &part_num);
 
   if (g_str_has_prefix (fsname, "/dev/disk/by-id/"))
     {
       if (part_num > 0)
-        explanation = g_strdup_printf (_("Matches partition %u of the device with the given vital product data"),
+        explanation = g_strdup_printf (_("Matches partition %d of the device with the given vital product data"),
                                        part_num);
       else
         explanation = g_strdup (_("Matches the whole disk of the device with the given vital product data"));
@@ -160,7 +159,7 @@ update_device_explanation (FstabDialogData *data)
   else if (g_str_has_prefix (fsname, "/dev/disk/by-path/"))
     {
       if (part_num > 0)
-        explanation = g_strdup_printf (_("Matches partition %u of any device connected at the given port or address"),
+        explanation = g_strdup_printf (_("Matches partition %d of any device connected at the given port or address"),
                                        part_num);
       else
         explanation = g_strdup (_("Matches the whole disk of any device connected at the given port or address"));
@@ -190,25 +189,21 @@ fstab_on_device_combobox_changed (GtkComboBox *combobox,
                                   gpointer     user_data)
 {
   FstabDialogData *data = user_data;
+  gchar *fsname;
+  gchar *proposed_mount_point;
+  const gchar *s;
 
-  if (!data->is_swap)
-    {
-      gchar *fsname;
-      gchar *proposed_mount_point;
-      const gchar *s;
+  fsname = gtk_combo_box_text_get_active_text (GTK_COMBO_BOX_TEXT (data->device_combobox));
+  s = strrchr (fsname, '/');
+  if (s == NULL)
+    s = strrchr (fsname, '=');
+  if (s == NULL)
+    s = "/disk";
+  proposed_mount_point = g_strdup_printf ("/mnt/%s", s + 1);
 
-      fsname = gtk_combo_box_text_get_active_text (GTK_COMBO_BOX_TEXT (data->device_combobox));
-      s = strrchr (fsname, '/');
-      if (s == NULL)
-        s = strrchr (fsname, '=');
-      if (s == NULL)
-        s = "/disk";
-      proposed_mount_point = g_strdup_printf ("/mnt/%s", s + 1);
-
-      gtk_entry_set_text (GTK_ENTRY (data->directory_entry), proposed_mount_point);
-      g_free (proposed_mount_point);
-      g_free (fsname);
-  }
+  gtk_entry_set_text (GTK_ENTRY (data->directory_entry), proposed_mount_point);
+  g_free (proposed_mount_point);
+  g_free (fsname);
 
   update_device_explanation (data);
 }
@@ -410,8 +405,6 @@ gdu_fstab_dialog_show (GduWindow    *window,
   data.icon_entry = GTK_WIDGET (gtk_builder_get_object (builder, "fstab-icon-entry"));
   data.symbolic_icon_entry = GTK_WIDGET (gtk_builder_get_object (builder, "fstab-symbolic-icon-entry"));
 
-  data.is_swap = (udisks_object_peek_swapspace (object) != NULL);
-
   /* there could be multiple fstab entries - we only consider the first one */
   g_variant_iter_init (&iter, udisks_block_get_configuration (block));
   while (g_variant_iter_next (&iter, "(&s@a{sv})", &configuration_type, &configuration_dict))
@@ -455,18 +448,6 @@ gdu_fstab_dialog_show (GduWindow    *window,
                                    drive,
                                    block,
                                    fsname);
-  if (data.is_swap)
-    {
-      dir = "none";
-      type = "swap";
-      opts = "sw";
-      gtk_widget_set_sensitive (data.directory_entry, FALSE);
-      gtk_widget_set_sensitive (data.show_checkbutton, FALSE);
-      gtk_widget_set_sensitive (data.name_entry, FALSE);
-      gtk_widget_set_sensitive (data.icon_entry, FALSE);
-      gtk_widget_set_sensitive (data.symbolic_icon_entry, FALSE);
-    }
-
   gtk_entry_set_text (GTK_ENTRY (data.directory_entry), dir);
   gtk_entry_set_text (GTK_ENTRY (data.type_entry), type);
   gtk_entry_set_text (GTK_ENTRY (data.options_entry), opts);

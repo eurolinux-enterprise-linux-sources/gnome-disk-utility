@@ -23,7 +23,7 @@ typedef struct _GduPasswordStrengthWidgetClass GduPasswordStrengthWidgetClass;
 
 struct _GduPasswordStrengthWidget
 {
-  GtkBox parent;
+  GtkHBox parent;
 
   GtkWidget *level_bar;
   GtkWidget *notebook;
@@ -33,7 +33,7 @@ struct _GduPasswordStrengthWidget
 
 struct _GduPasswordStrengthWidgetClass
 {
-  GtkBoxClass parent_class;
+  GtkHBoxClass parent_class;
 };
 
 enum
@@ -42,7 +42,7 @@ enum
   PROP_PASSWORD,
 };
 
-G_DEFINE_TYPE (GduPasswordStrengthWidget, gdu_password_strength_widget, GTK_TYPE_BOX)
+G_DEFINE_TYPE (GduPasswordStrengthWidget, gdu_password_strength_widget, GTK_TYPE_HBOX)
 
 static void
 gdu_password_strength_widget_finalize (GObject *object)
@@ -195,7 +195,6 @@ gdu_password_strength_widget_constructed (GObject *object)
 
   widget->notebook = gtk_notebook_new ();
   gtk_notebook_set_show_tabs (GTK_NOTEBOOK (widget->notebook), FALSE);
-  gtk_notebook_set_show_border (GTK_NOTEBOOK (widget->notebook), FALSE);
   gtk_box_pack_start (GTK_BOX (widget), widget->notebook, FALSE, TRUE, 0);
 
   for (n = 0; n < G_N_ELEMENTS (hint_labels); n++)
@@ -203,7 +202,7 @@ gdu_password_strength_widget_constructed (GObject *object)
       GtkWidget *label;
       gchar *s;
       label = gtk_label_new (NULL);
-      gtk_label_set_xalign (GTK_LABEL (label), 0.0);
+      gtk_misc_set_alignment (GTK_MISC (label), 0, 0.5);
       s = g_strdup_printf ("<small>%s</small>",
                            g_dpgettext2 (NULL, "Password strength", hint_labels[n]));
       gtk_label_set_markup (GTK_LABEL (label), s);
